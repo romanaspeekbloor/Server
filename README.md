@@ -1,6 +1,10 @@
-### RRL-SDR
+# RRL-SDR Server
 
-### Freqs
-- 88780000:88800000:0.5k 
-- 153680700:153700700:0.5k 
-- 153284000:153304000:0.5k
+#### Description
+Server for receiving and processing rtl_power data.
+
+### Libraries / Frameworks
+- NodeJS
+- WebSocket
+
+to be updated...
