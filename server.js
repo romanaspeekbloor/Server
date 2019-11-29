@@ -33,8 +33,12 @@ ws.on('close', () => {
   console.log('closing connection');
 });
 
+/*
+ * Object returning console.log
+ * TODO saving to file etc 
+ * err: (d: Any) info: (d: Any)
+ */
 const log = ({
-  // TODO check if object and more after
   err: (d) => console.error(`\x1b[31m ERROR: \x1b[0m\n ${d}`),
   info: (d) => {
     // mmm
@@ -42,10 +46,22 @@ const log = ({
   }
 });
 
+const toNum = (str) => {
+   const n = Number(str.toString());
+  if (!isNaN(n)) return n;
+};
+
+/* 
+ * sampler returns an array of noise levels
+ * raw: String
+ */
 const sampler = (raw) => {
-  log.info('sampling');
-  const smpl = raw.match(/\d+([.])\d{2}/g);
+  log.info(`sampling... raw length = [${raw.length}]`);
+  const smpl = raw.match(/([-])\d+([.])\d{2}/g);
   console.log('length: ', smpl.length, typeof smpl[0]);
+  const freqs = smpl.map(s => toNum(s));
+  // do something store sort etc...
+  return freqs;
 }
 
 const handleMessage = (msg) => {
@@ -55,10 +71,16 @@ const handleMessage = (msg) => {
   }
 
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
-  const { error, data, b = 'ads', rx = data, ...rest } = d;
-  console.log(d);
-  if (error) log.err(error);
-  if (rx) sampler(rx);
+  const { error, data, rx = data, ...props } = d;
+  log.info({d});
+
+  if (error) {
+    // TODO handle error (sent instruction to reset or something)
+    return log.err(error);
+  }
+
+  samples = rx ? sampler(rx) : 'no data...';
+  log.info({ samples: samples.splice(0 ,10), ...props });
 };
 
 // root get 
