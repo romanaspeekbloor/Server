@@ -11,10 +11,13 @@ const ws = new WebSocket.Server({ port: 9000, clientTracking: true });
 let socket;
 
 setInterval(() => {
-  const execT = new Date().getTime() + 2000;
+  const execT = 2000;
+  const t = new Date().getTime();
   const res = {
+    serverTime: t, 
     execT,
   };
+  console.log('res: ', res);
   if (socket) {
     ws.clients.forEach(c => {
       c.send(JSON.stringify(res));
@@ -22,9 +25,17 @@ setInterval(() => {
   }
 }, 5000);
 
+const Send = (actions) => {
+  socket.send(JSON.stringify({
+    timestamp: new Date().getTime(),
+    actions
+  })); 
+};
+
 ws.on('connection', (s) => {
   socket = s; 
   // loop(socket);
+  Send(['setTime']);
   socket.on('message', handleMessage);
 });
 
@@ -72,11 +83,10 @@ const handleMessage = (msg) => {
 
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
-  log.info({d});
 
   if (error) {
     // TODO handle error (sent instruction to reset or something)
-    return log.err(error);
+    return log.info({ error, props });
   }
 
   samples = rx ? sampler(rx) : 'no data...';
@@ -95,6 +105,6 @@ app.get('/', (req, res) => {
 
 // listen
 app.listen(3010, () => {
-  console.log('listening 3000');
+  console.log('server started...');
 });
 
