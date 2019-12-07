@@ -25,9 +25,10 @@ setInterval(() => {
   }
 }, 5000);
 
-const Send = (actions) => {
+const Send = (actions, params) => {
   socket.send(JSON.stringify({
     timestamp: new Date().getTime(),
+    params ? params : null,
     actions
   })); 
 };
