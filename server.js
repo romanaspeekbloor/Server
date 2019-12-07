@@ -10,6 +10,7 @@ const cors = require('cors');
 const ws = new WebSocket.Server({ port: 9000, clientTracking: true }); 
 let socket;
 
+// TODO process.hrtime.bigint()
 setInterval(() => {
   const execT = 2000;
   const t = new Date().getTime();
@@ -28,7 +29,7 @@ setInterval(() => {
 const Send = (actions, params) => {
   socket.send(JSON.stringify({
     timestamp: new Date().getTime(),
-    params ? params : null,
+    params: params ? params : null,
     actions
   })); 
 };
@@ -70,9 +71,7 @@ const toNum = (str) => {
 const sampler = (raw) => {
   log.info(`sampling... raw length = [${raw.length}]`);
   const smpl = raw.match(/([-])\d+([.])\d{2}/g);
-  console.log('length: ', smpl.length, typeof smpl[0]);
   const freqs = smpl.map(s => toNum(s));
-  // do something store sort etc...
   return freqs;
 }
 
@@ -91,6 +90,8 @@ const handleMessage = (msg) => {
   }
 
   samples = rx ? sampler(rx) : 'no data...';
+  // TODO if samples do match some criteria
+  // 2 functions one to form date object and another one for storing
   log.info({ samples: samples.splice(0 ,10), ...props });
 };
 
