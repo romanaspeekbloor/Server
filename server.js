@@ -92,7 +92,7 @@ const handleMessage = (msg) => {
   samples = rx ? sampler(rx) : 'no data...';
   // TODO if samples do match some criteria
   // 2 functions one to form date object and another one for storing
-  log.info({ samples: samples.splice(0 ,10), ...props });
+  log.info({ ...props });
 };
 
 // root get 
