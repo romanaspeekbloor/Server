@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 const mongoose = require('mongoose');
-const WebSocket = require('ws');
 const express = require('express');
 const io = require('socket.io')(9955);
 const app = express();
-const cors = require('cors');
+
+// mongoose.connect('mongodb://127.0.0.1:27017/sdrf', { useNewUrlParser: true});
+
+const clients = [];
 
 /**
  *  Set client configuration
@@ -18,19 +20,31 @@ const setClient = (s) => {
   });
 };
 
+/**
+ * Adds client to the clients array so
+ * it can be checked if messages has been received
+ * name: {string} client name
+ * msg: {string} msg
+ */
+const handleClientConnect = (name, msg) => {
+  // TODO something else...
+  console.log(msg);
+  clients.push(name);
+};
+
+// TODO keep a track which clients connected so later
+// we can check if we have received a message from each 
+// and send another sampling request
 io.on('connection', (s) => {
   console.log('connected: ');
   setClient(s);
   s.on('getSamples', handleMessage);
+  s.on('onClientConnect', handleClientConnect);
 });
-
-// mongoose.connect('mongodb://127.0.0.1:27017/sdrf', { useNewUrlParser: true});
-
-const ws = new WebSocket.Server({ port: 9000, clientTracking: true }); 
-let socket;
 
 // TODO process.hrtime.bigint()
 setInterval(() => {
+  console.log({ clients });
   // io.sockets to send message to all sockets
   // ('eventName', arg1, arg2, ...)
   const execT = 2000;
@@ -50,18 +64,6 @@ const Send = (actions, params) => {
     actions
   })); 
 };
-
-ws.on('connection', (s) => {
-  socket = s; 
-  // loop(socket);
-  Send(['setTime']);
-  socket.on('message', handleMessage);
-});
-
-// websocket close
-ws.on('close', () => {
-  console.log('closing connection');
-});
 
 /*
  * Object returning console.log
