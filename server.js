@@ -6,12 +6,22 @@ const io = require('socket.io')(9955);
 const app = express();
 const cors = require('cors');
 
+/**
+ *  Set client configuration
+ *  s: {socket}
+ */
+const setClient = (s) => {
+  s.emit('setClient', {
+    fqRange: '153M:153,3M',
+    sampleRate: '1k',
+    serverTime: new Date().getTime()
+  });
+};
+
 io.on('connection', (s) => {
   console.log('connected: ');
-  s.emit('test', 'yo');
-  s.on('myEvent', (a, b, c) => {
-    console.log(`My event\n params: ${a}, ${b}, ${c}`);
-  });
+  setClient(s);
+  s.on('getSamples', handleMessage);
 });
 
 // mongoose.connect('mongodb://127.0.0.1:27017/sdrf', { useNewUrlParser: true});
@@ -21,6 +31,8 @@ let socket;
 
 // TODO process.hrtime.bigint()
 setInterval(() => {
+  // io.sockets to send message to all sockets
+  // ('eventName', arg1, arg2, ...)
   const execT = 2000;
   const t = new Date().getTime();
   const res = {
@@ -28,11 +40,7 @@ setInterval(() => {
     execT,
   };
   console.log('res: ', res);
-  if (socket) {
-    ws.clients.forEach(c => {
-      c.send(JSON.stringify(res));
-    });
-  }
+  io.sockets.emit('getSamples', JSON.stringify(res));
 }, 5000);
 
 const Send = (actions, params) => {
