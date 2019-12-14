@@ -2,8 +2,17 @@
 const mongoose = require('mongoose');
 const WebSocket = require('ws');
 const express = require('express');
+const io = require('socket.io')(9955);
 const app = express();
 const cors = require('cors');
+
+io.on('connection', (s) => {
+  console.log('connected: ');
+  s.emit('test', 'yo');
+  s.on('myEvent', (a, b, c) => {
+    console.log(`My event\n params: ${a}, ${b}, ${c}`);
+  });
+});
 
 // mongoose.connect('mongodb://127.0.0.1:27017/sdrf', { useNewUrlParser: true});
 
