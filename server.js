@@ -26,10 +26,10 @@ const setClient = (s) => {
  * name: {string} client name
  * msg: {string} msg
  */
-const handleClientConnect = (name, msg) => {
+const handleClientConnect = (name, msg, s) => {
   // TODO something else...
   console.log(msg);
-  clients.push(name);
+  clients.push(s);
 };
 
 // TODO keep a track which clients connected so later
@@ -39,12 +39,16 @@ io.on('connection', (s) => {
   console.log('connected: ');
   setClient(s);
   s.on('getSamples', handleMessage);
-  s.on('onClientConnect', handleClientConnect);
+  s.on('onClientConnect', (name, msg) => handleClientConnect(name, msg, s));
+  s.on('disconnect', () => {
+    console.log('client disconnected.');
+    clients.splice(clients.indexOf(s), 1);
+  });
 });
 
 // TODO process.hrtime.bigint()
 setInterval(() => {
-  console.log({ clients });
+  console.log('connected clients: ', clients.length);
   // io.sockets to send message to all sockets
   // ('eventName', arg1, arg2, ...)
   const execT = 2000;
