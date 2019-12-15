@@ -6,7 +6,10 @@ const app = express();
 
 // mongoose.connect('mongodb://127.0.0.1:27017/sdrf', { useNewUrlParser: true});
 
+// global vars *tmp
 const clients = [];
+const execT = 2000;
+let clientsCount = 0;
 
 /**
  *  Set client configuration
@@ -27,8 +30,9 @@ const setClient = (s) => {
  * msg: {string} msg
  */
 const handleClientConnect = (name, msg, s) => {
-  // TODO something else...
-  console.log(msg);
+  console.log('connected: ', name);
+  emitToOne('getSamples', name, s);
+  s.name = name;
   clients.push(s);
 };
 
@@ -36,9 +40,8 @@ const handleClientConnect = (name, msg, s) => {
 // we can check if we have received a message from each 
 // and send another sampling request
 io.on('connection', (s) => {
-  console.log('connected: ');
   setClient(s);
-  s.on('getSamples', handleMessage);
+  s.on('getSamples', (msg) => handleGetSamples(msg, s));
   s.on('onClientConnect', (name, msg) => handleClientConnect(name, msg, s));
   s.on('disconnect', () => {
     console.log('client disconnected.');
@@ -46,27 +49,28 @@ io.on('connection', (s) => {
   });
 });
 
-// TODO process.hrtime.bigint()
-setInterval(() => {
-  console.log('connected clients: ', clients.length);
-  // io.sockets to send message to all sockets
-  // ('eventName', arg1, arg2, ...)
-  const execT = 2000;
-  const t = new Date().getTime();
-  const res = {
-    serverTime: t, 
-    execT,
-  };
-  console.log('res: ', res);
-  io.sockets.emit('getSamples', JSON.stringify(res));
-}, 5000);
+const smplReq = (data) => ({
+  serverTime: new Date().getTime(),
+  execT,
+});
 
-const Send = (actions, params) => {
-  socket.send(JSON.stringify({
-    timestamp: new Date().getTime(),
-    params: params ? params : null,
-    actions
-  })); 
+const emitToOne = (event, data, s) => {
+  // TODO calc offset when to request new t or update execT
+  s.emit(event, smplReq(data));
+};
+
+const emitToAll = async (event, data) => {
+  // delay
+  await new Promise(r => setTimeout(r, 7000));
+  const req = smplReq();
+  // tmp 
+  clientsCount = 0;
+  io.sockets.emit(event, req);
+  console.log(`==================================
+    emitting [${event}] event
+    clients [${clients.map(c => c.name)}]
+    server timestamp: ${req.serverTime}
+  `);
 };
 
 /*
@@ -98,24 +102,24 @@ const sampler = (raw) => {
   return freqs;
 }
 
-const handleMessage = (msg) => {
-  // TODO better way..
-  if (msg.length < 100) {
-    return console.log(msg);
-  }
-
+const handleGetSamples = (msg, s) => {
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
 
-  if (error) {
-    // TODO handle error (sent instruction to reset or something)
-    return log.info({ error, props });
-  }
+  // TODO clients object with statuses or something
+  if (clients.indexOf(s) > -1) clientsCount++; 
 
-  samples = rx ? sampler(rx) : 'no data...';
-  // TODO if samples do match some criteria
-  // 2 functions one to form date object and another one for storing
-  log.info({ ...props });
+  error ?
+    /* error handler */ () => '' :
+    samples = rx ? sampler(rx) : 'no data...';
+
+  log.info({ props });
+
+  // TODO call sockets.emit timer
+  // different approach
+  if (clientsCount === clients.length) { 
+    emitToAll('getSamples', 'yo'); 
+  }
 };
 
 // root get 
