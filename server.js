@@ -8,8 +8,9 @@ const app = express();
 
 // global vars *tmp
 const clients = [];
+const clientNames = [];
 const execT = 2000;
-let clientsCount = 0;
+let clientResponses = 0;
 
 /**
  *  Set client configuration
@@ -30,6 +31,7 @@ const setClient = (s) => {
  * msg: {string} msg
  */
 const handleClientConnect = (name, msg, s) => {
+  clientNames.push(name);
   console.log('connected: ', name);
   emitToOne('getSamples', name, s);
   s.name = name;
@@ -46,31 +48,30 @@ io.on('connection', (s) => {
   s.on('disconnect', () => {
     console.log('client disconnected.');
     clients.splice(clients.indexOf(s), 1);
+    console.log('clients: ', s.name);
+    clientNames.splice(clientNames.indexOf(s), 1);
   });
 });
 
-const smplReq = (data) => ({
+const smplReq = () => ({
   serverTime: new Date().getTime(),
   execT,
 });
 
 const emitToOne = (event, data, s) => {
   // TODO calc offset when to request new t or update execT
-  s.emit(event, smplReq(data));
+  s.emit(event, smplReq());
 };
 
 const emitToAll = async (event, data) => {
   // delay
   await new Promise(r => setTimeout(r, 7000));
   const req = smplReq();
-  // tmp 
-  clientsCount = 0;
   io.sockets.emit(event, req);
-  console.log(`==================================
+  console.log(`\n==================================
     emitting [${event}] event
     clients [${clients.map(c => c.name)}]
-    server timestamp: ${req.serverTime}
-  `);
+    server timestamp: ${req.serverTime}`);
 };
 
 /*
@@ -107,17 +108,18 @@ const handleGetSamples = (msg, s) => {
   const { error, data, rx = data, ...props } = d;
 
   // TODO clients object with statuses or something
-  if (clients.indexOf(s) > -1) clientsCount++; 
+  clientResponses++; 
 
   error ?
-    /* error handler */ () => '' :
+    /* error handler */ () => 0 :
     samples = rx ? sampler(rx) : 'no data...';
 
   log.info({ props });
 
   // TODO call sockets.emit timer
   // different approach
-  if (clientsCount === clients.length) { 
+  if (clientResponses === clients.length) { 
+    clientResponses = 0;
     emitToAll('getSamples', 'yo'); 
   }
 };
