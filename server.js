@@ -1,19 +1,15 @@
 #!/usr/bin/env node
-const mongoose = require('mongoose');
 const express = require('express');
 const io = require('socket.io')(9955);
 const app = express();
 
-// mongoose.connect('mongodb://127.0.0.1:27017/sdrf', { useNewUrlParser: true});
-
 // global vars *tmp
 const clients = [];
-const clientNames = [];
 const execT = 2000;
-let clientResponses = 0;
+let clientResponses = [];
 
 /**
- *  Set client configuration
+ *  Set configuration for all client
  *  s: {socket}
  */
 const setClient = (s) => {
@@ -31,16 +27,16 @@ const setClient = (s) => {
  * msg: {string} msg
  */
 const handleClientConnect = (name, msg, s) => {
-  clientNames.push(name);
   console.log('connected: ', name);
   emitToOne('getSamples', name, s);
   s.name = name;
   clients.push(s);
 };
 
-// TODO keep a track which clients connected so later
-// we can check if we have received a message from each 
-// and send another sampling request
+/**
+ * on socket connetion, event handlers
+ * arg1: event ('connection'), arg2: callback (SOCKET)  
+ */
 io.on('connection', (s) => {
   setClient(s);
   s.on('getSamples', (msg) => handleGetSamples(msg, s));
@@ -53,6 +49,9 @@ io.on('connection', (s) => {
   });
 });
 
+/**
+ * compile sample request object
+ */
 const smplReq = () => ({
   serverTime: new Date().getTime(),
   execT,
@@ -67,6 +66,8 @@ const emitToAll = async (event, data) => {
   // delay
   await new Promise(r => setTimeout(r, 7000));
   const req = smplReq();
+
+  clientResponses = [];
   io.sockets.emit(event, req);
   console.log(`\n==================================
     emitting [${event}] event
@@ -103,12 +104,25 @@ const sampler = (raw) => {
   return freqs;
 }
 
+const checkArrays = (a, b) => {
+  if (a === b) return 1;
+  if (a == null || b == null) return 0;
+  if (a.length != b.length) return 0;
+
+  for(let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return 0;
+  }
+
+  return 1;
+};
+
 const handleGetSamples = (msg, s) => {
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
 
-  // TODO clients object with statuses or something
-  clientResponses++; 
+  if (clientResponses.indexOf(s.name) === -1) clientResponses.push(s.name);
+  console.log({ clientResponses });
+
 
   error ?
     /* error handler */ () => 0 :
@@ -118,8 +132,7 @@ const handleGetSamples = (msg, s) => {
 
   // TODO call sockets.emit timer
   // different approach
-  if (clientResponses === clients.length) { 
-    clientResponses = 0;
+  if (checkArrays(clients.map(c => c.name), clientResponses) && clients.length > 1) {
     emitToAll('getSamples', 'yo'); 
   }
 };
