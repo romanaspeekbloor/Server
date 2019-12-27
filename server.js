@@ -45,7 +45,7 @@ io.on('connection', (s) => {
     console.log('client disconnected.');
     clients.splice(clients.indexOf(s), 1);
     console.log('clients: ', s.name);
-    clientNames.splice(clientNames.indexOf(s), 1);
+    clientResponses.splice(clientResponses.indexOf(s), 1);
   });
 });
 
@@ -63,12 +63,31 @@ const emitToOne = (event, data, s) => {
 };
 
 const emitToAll = async (event, data) => {
+  console.log('emitting to aLL');
   // delay
   await new Promise(r => setTimeout(r, 7000));
   const req = smplReq();
 
+  /*
+  clients.forEach(c => {
+    const start = process.hrtime.bigint();
+    data.forEach(d => {
+      if (d.name === c.name) {
+        Object.keys(d).forEach(key => {
+          const dt = process.hrtime.bigint() - start;
+          key === 'benchMark' ? 
+            req[key] = (BigInt(d[key]) + (7000000000n + dt)).toString() : 
+            req[key] = d[key];
+        });
+        c.emit(event, req);
+        console.log('info: ', { req });
+      }
+    });
+  });
+  */
   clientResponses = [];
   io.sockets.emit(event, req);
+  
   console.log(`\n==================================
     emitting [${event}] event
     clients [${clients.map(c => c.name)}]
@@ -76,6 +95,7 @@ const emitToAll = async (event, data) => {
 };
 
 /*
+erver 192.168.10.242
  * Object returning console.log
  * TODO saving to file etc 
  * err: (d: Any) info: (d: Any)
@@ -105,7 +125,7 @@ const sampler = (raw) => {
 }
 
 const checkArrays = (a, b) => {
-  if (a === b) return 1;
+  if (a === b) return 0;
   if (a == null || b == null) return 0;
   if (a.length != b.length) return 0;
 
@@ -119,10 +139,8 @@ const checkArrays = (a, b) => {
 const handleGetSamples = (msg, s) => {
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
-
-  if (clientResponses.indexOf(s.name) === -1) clientResponses.push(s.name);
-  console.log({ clientResponses });
-
+  const names = clientResponses.map(c => c.name);
+  if (!names.includes(s.name)) clientResponses.push({ name: s.name, benchMark: props.benchMark });
 
   error ?
     /* error handler */ () => 0 :
@@ -132,8 +150,9 @@ const handleGetSamples = (msg, s) => {
 
   // TODO call sockets.emit timer
   // different approach
-  if (checkArrays(clients.map(c => c.name), clientResponses) && clients.length > 1) {
-    emitToAll('getSamples', 'yo'); 
+//  if (checkArrays(clients.map(c => c.name), clientResponses.map(c => c.name))) {
+  if (clients.map(c => c.name).length === clientResponses.length && clients.length > 1) {
+    emitToAll('getSamples', clientResponses); 
   }
 };
 
