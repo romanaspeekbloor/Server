@@ -35,6 +35,7 @@ const handleClientConnect = (name, msg, s) => {
 
 /**
  * on socket connetion, event handlers
+erver 192.168.10.242
  * arg1: event ('connection'), arg2: callback (SOCKET)  
  */
 io.on('connection', (s) => {
@@ -68,23 +69,6 @@ const emitToAll = async (event, data) => {
   await new Promise(r => setTimeout(r, 7000));
   const req = smplReq();
 
-  /*
-  clients.forEach(c => {
-    const start = process.hrtime.bigint();
-    data.forEach(d => {
-      if (d.name === c.name) {
-        Object.keys(d).forEach(key => {
-          const dt = process.hrtime.bigint() - start;
-          key === 'benchMark' ? 
-            req[key] = (BigInt(d[key]) + (7000000000n + dt)).toString() : 
-            req[key] = d[key];
-        });
-        c.emit(event, req);
-        console.log('info: ', { req });
-      }
-    });
-  });
-  */
   clientResponses = [];
   io.sockets.emit(event, req);
   
@@ -94,8 +78,7 @@ const emitToAll = async (event, data) => {
     server timestamp: ${req.serverTime}`);
 };
 
-/*
-erver 192.168.10.242
+/**
  * Object returning console.log
  * TODO saving to file etc 
  * err: (d: Any) info: (d: Any)
@@ -136,22 +119,47 @@ const checkArrays = (a, b) => {
   return 1;
 };
 
+// check if sampling time is the same (ms)
+const checkSamplingTime = (responses) => {
+  // validate execution time
+  const save = responses.map(r => r.startedAt)
+    .every(t => t === responses[0].startedAt);
+
+  if (save) {
+    // TODO save and etc. 
+    // model.save(<props>, <params>);
+    console.log({ save }, responses.map(r => {
+      delete r.samples;
+      return r;
+    }));
+  }
+};
+
 const handleGetSamples = (msg, s) => {
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
   const names = clientResponses.map(c => c.name);
-  if (!names.includes(s.name)) clientResponses.push({ name: s.name, benchMark: props.benchMark });
+  if (!names.includes(s.name)) {
+    clientResponses.push({
+      name: s.name,
+      startedAt: props.startedAt,
+      benchMark: props.benchMark
+    });
+  }
 
   error ?
     /* error handler */ () => 0 :
-    samples = rx ? sampler(rx) : 'no data...';
+    samples = rx ? clientResponses.forEach((c, i) => {
+      if (c.name === s.name) {
+        clientResponses[i].samples = sampler(rx);
+      }
+    }) : 'no data...';
 
   log.info({ props });
 
-  // TODO call sockets.emit timer
-  // different approach
-//  if (checkArrays(clients.map(c => c.name), clientResponses.map(c => c.name))) {
   if (clients.map(c => c.name).length === clientResponses.length && clients.length > 1) {
+    // check if all started at the same time (ms) presicion
+    checkSamplingTime(clientResponses);
     emitToAll('getSamples', clientResponses); 
   }
 };
