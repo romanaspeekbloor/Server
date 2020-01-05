@@ -7,17 +7,20 @@ const app = express();
 const clients = [];
 const execT = 2000;
 let clientResponses = [];
+let getSamples = false;
 
 /**
  *  Set configuration for all client
  *  s: {socket}
  */
 const setClient = (s) => {
-  s.emit('setClient', {
-    fqRange: '153M:153,3M',
-    sampleRate: '1k',
-    serverTime: new Date().getTime()
-  });
+  if (clients.length < 1) {
+    s.emit('setClient', {
+      fqRange: '153M:153,3M',
+      sampleRate: '1k',
+      serverTime: new Date().getTime()
+    });
+  }
 };
 
 /**
@@ -64,12 +67,12 @@ const emitToOne = (event, data, s) => {
 };
 
 const emitToAll = async (event, data) => {
+  clientResponses = [];
   console.log('emitting to aLL');
   // delay
   await new Promise(r => setTimeout(r, 7000));
   const req = smplReq();
 
-  clientResponses = [];
   io.sockets.emit(event, req);
   
   console.log(`\n==================================
@@ -127,7 +130,7 @@ const checkSamplingTime = (responses) => {
 
   if (save) {
     // TODO save and etc. 
-    // model.save(<props>, <params>);
+    // model.save( <props>, <params>);
     console.log({ save }, responses.map(r => {
       delete r.samples;
       return r;
@@ -157,7 +160,7 @@ const handleGetSamples = (msg, s) => {
 
   log.info({ props });
 
-  if (clients.map(c => c.name).length === clientResponses.length && clients.length > 1) {
+  if (clients.length === clientResponses.length && clients.length > 1) {
     // check if all started at the same time (ms) presicion
     checkSamplingTime(clientResponses);
     emitToAll('getSamples', clientResponses); 
