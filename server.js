@@ -6,6 +6,7 @@ const app = express();
 // global vars *tmp
 const clients = [];
 const execT = 2000;
+const samplingDelay = 7000;
 let clientResponses = [];
 let getSamples = false;
 
@@ -29,11 +30,19 @@ const setClient = (s) => {
  * name: {string} client name
  * msg: {string} msg
  */
-const handleClientConnect = (name, msg, s) => {
+// very nasty ...
+let testCounter = 0;
+const handleClientConnect = async (name, msg, s) => {
   console.log('connected: ', name);
-  emitToOne('getSamples', name, s);
   s.name = name;
   clients.push(s);
+  testCounter = 0;
+  while (testCounter < 100) {
+    await new Promise(r => setTimeout(r, 20));
+    testCounter++;
+  }
+  if (!getSamples) emitToAll('getSamples', clients.map(c => name));
+  getSamples = true;
 };
 
 /**
@@ -58,20 +67,16 @@ io.on('connection', (s) => {
  */
 const smplReq = () => ({
   serverTime: new Date().getTime(),
-  execT,
+  serverDelay: samplingDelay * 1000000
 });
-
-const emitToOne = (event, data, s) => {
-  // TODO calc offset when to request new t or update execT
-  s.emit(event, smplReq());
-};
 
 const emitToAll = async (event, data) => {
   clientResponses = [];
   console.log('emitting to aLL');
   // delay
-  await new Promise(r => setTimeout(r, 7000));
+  await new Promise(r => setTimeout(r, samplingDelay));
   const req = smplReq();
+  req.data = data;
 
   io.sockets.emit(event, req);
   
@@ -79,6 +84,7 @@ const emitToAll = async (event, data) => {
     emitting [${event}] event
     clients [${clients.map(c => c.name)}]
     server timestamp: ${req.serverTime}`);
+  getSamples = false;
 };
 
 /**
@@ -139,9 +145,11 @@ const checkSamplingTime = (responses) => {
 };
 
 const handleGetSamples = (msg, s) => {
+  console.log({ msg });
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
   const names = clientResponses.map(c => c.name);
+  console.log('L: ', clients.length);
   if (!names.includes(s.name)) {
     clientResponses.push({
       name: s.name,
@@ -154,7 +162,7 @@ const handleGetSamples = (msg, s) => {
     /* error handler */ () => 0 :
     samples = rx ? clientResponses.forEach((c, i) => {
       if (c.name === s.name) {
-        clientResponses[i].samples = sampler(rx);
+        // clientResponses[i].samples = sampler(rx);
       }
     }) : 'no data...';
 
