@@ -84,7 +84,6 @@ const emitToAll = async (event, data) => {
     emitting [${event}] event
     clients [${clients.map(c => c.name)}]
     server timestamp: ${req.serverTime}`);
-  getSamples = false;
 };
 
 /**
@@ -149,12 +148,14 @@ const handleGetSamples = (msg, s) => {
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
   const names = clientResponses.map(c => c.name);
-  console.log('L: ', clients.length);
+
+  log.info({ props });
+
   if (!names.includes(s.name)) {
     clientResponses.push({
       name: s.name,
       startedAt: props.startedAt,
-      benchMark: props.benchMark
+      benchMark: props.benchMark,
     });
   }
 
@@ -166,7 +167,6 @@ const handleGetSamples = (msg, s) => {
       }
     }) : 'no data...';
 
-  log.info({ props });
 
   if (clients.length === clientResponses.length && clients.length > 1) {
     // check if all started at the same time (ms) presicion
