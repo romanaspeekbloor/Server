@@ -5,7 +5,7 @@ const app = express();
 
 const db = require('./lib/db');
 
-console.log({ db })
+console.log(db.sequelize.models.samples.create({ freq_band_name: 'b', data: 'asd' }).then((r) => console.log(r)));
 
 // global vars *tmp
 const clients = [];
