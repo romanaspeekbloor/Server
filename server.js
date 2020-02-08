@@ -3,9 +3,12 @@ const express = require('express');
 const io = require('socket.io')(9955);
 const app = express();
 
+const db = require('./lib/db');
+
+console.log({ db })
+
 // global vars *tmp
 const clients = [];
-const execT = 2000;
 const samplingDelay = 7000;
 let clientResponses = [];
 let getSamples = false;
