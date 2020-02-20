@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 const express = require('express');
 const io = require('socket.io')(9955);
+const uuidv1 = require('uuid/v1');
 const app = express();
 
 const db = require('./lib/db');
-
-console.log(db.sequelize.models.samples.create({ freq_band_name: 'b', data: 'asd' }).then((r) => console.log(r)));
 
 // global vars *tmp
 const clients = [];
@@ -27,6 +26,36 @@ const setClient = (s) => {
   }
 };
 
+const insertClient = async (name, params) => {
+  // TODO sort config at the client level
+  // create client online/active handler so it can be set on/off
+  console.log({ params });
+  if (!params.device_name) return Promise.resolve();
+  const client = {
+    uuid: uuidv1(),
+    ...params,
+    is_online: true,
+    is_active: true,
+    date_added: new Date(),
+    date_online: new Date(),
+  };
+
+  await db.clients.create(client);
+  return Promise.resolve(client);
+};
+
+const verifyClient = async (name, params) => {
+  const filters = {
+    where: {
+      device_name: name,
+    },
+  };
+  const client = await db.clients.findOne(filters);
+  if (!client) return insertClient(name, params);
+  console.log('client found: ', client.dataValues);
+  return Promise.resolve(client.dataValues);
+};
+
 /**
  * Adds client to the clients array so
  * it can be checked if messages has been received
@@ -35,22 +64,26 @@ const setClient = (s) => {
  */
 // very nasty ...
 let testCounter = 0;
-const handleClientConnect = async (name, msg, s) => {
+const handleClientConnect = async (name, params, s) => {
   console.log('connected: ', name);
-  s.name = name;
-  clients.push(s);
+  const client = await verifyClient(name, params);
+  if (!client) return 0;
+  s.rx = client;
+  if (s.rx.is_online) {
+    clients.push(s);
+    s.join('online');
+  }
   testCounter = 0;
   while (testCounter < 100) {
     await new Promise(r => setTimeout(r, 20));
     testCounter++;
   }
-  if (!getSamples) emitToAll('getSamples', clients.map(c => name));
+  if (!getSamples) emitTo('online', 'getSamples', clients.map(c => name));
   getSamples = true;
 };
 
 /**
- * on socket connetion, event handlers
-erver 192.168.10.242
+ * on socket connetion, event handler server 192.168.10.242
  * arg1: event ('connection'), arg2: callback (SOCKET)  
  */
 io.on('connection', (s) => {
@@ -70,10 +103,10 @@ io.on('connection', (s) => {
  */
 const smplReq = () => ({
   serverTime: new Date().getTime(),
-  serverDelay: samplingDelay * 1000000
+  serverDelay: samplingDelay * 1000000,
 });
 
-const emitToAll = async (event, data) => {
+const emitTo = async (room, event, data) => {
   clientResponses = [];
   console.log('emitting to aLL');
   // delay
@@ -81,11 +114,11 @@ const emitToAll = async (event, data) => {
   const req = smplReq();
   req.data = data;
 
-  io.sockets.emit(event, req);
+  io.to(room).emit(event, req);
   
   console.log(`\n==================================
     emitting [${event}] event
-    clients [${clients.map(c => c.name)}]
+    clients [${clients.map(c => c.rx.device_name)}]
     server timestamp: ${req.serverTime}`);
 };
 
@@ -130,6 +163,16 @@ const checkArrays = (a, b) => {
   return 1;
 };
 
+const insertSample = (data) => {
+  console.log({ data });
+  const sample = {
+    freq_band_name: 'n/a',
+    data: JSON.stringify(data.samples),
+    sampling_start: data.startedAt,
+  }
+  return db.samples.create(sample);
+};
+
 // check if sampling time is the same (ms)
 const checkSamplingTime = (responses) => {
   // validate execution time
@@ -137,17 +180,14 @@ const checkSamplingTime = (responses) => {
     .every(t => t === responses[0].startedAt);
 
   if (save) {
-    // TODO save and etc. 
-    // model.save( <props>, <params>);
-    console.log({ save }, responses.map(r => {
-      delete r.samples;
-      return r;
-    }));
+    console.log('saving samples...');
+    return Promise.all(responses.map(res => {
+      return insertSample(res); 
+    })).then(() => Promise.resolve());
   }
 };
 
-const handleGetSamples = (msg, s) => {
-  console.log({ msg });
+const handleGetSamples = async (msg, s) => {
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
   const names = clientResponses.map(c => c.name);
@@ -156,7 +196,8 @@ const handleGetSamples = (msg, s) => {
 
   if (!names.includes(s.name)) {
     clientResponses.push({
-      name: s.name,
+      name: s.rx.device_name,
+      uuid: s.rx.uuid,
       startedAt: props.startedAt,
       benchMark: props.benchMark,
     });
@@ -165,16 +206,16 @@ const handleGetSamples = (msg, s) => {
   error ?
     /* error handler */ () => 0 :
     samples = rx ? clientResponses.forEach((c, i) => {
-      if (c.name === s.name) {
-        // clientResponses[i].samples = sampler(rx);
+      if (c.name === s.rx.device_name) {
+        clientResponses[i].samples = sampler(rx);
       }
     }) : 'no data...';
 
 
-  if (clients.length === clientResponses.length && clients.length > 1) {
+  if (clients.length === clientResponses.length && clients.length > 0) {
     // check if all started at the same time (ms) presicion
-    checkSamplingTime(clientResponses);
-    emitToAll('getSamples', clientResponses); 
+    await checkSamplingTime(clientResponses);
+    emitTo('online', 'getSamples', clientResponses); 
   }
 };
 
