@@ -3,6 +3,7 @@ const express = require('express');
 const io = require('socket.io')(9955);
 const uuidv1 = require('uuid/v1');
 const app = express();
+const cors = require('cors');
 
 const db = require('./lib/db');
 
@@ -35,9 +36,9 @@ const insertClient = async (name, params) => {
     uuid: uuidv1(),
     ...params,
     is_online: true,
-    is_active: true,
+    is_active: false,
     date_added: new Date(),
-    date_online: new Date(),
+    date_online: null,
   };
 
   await db.clients.create(client);
@@ -219,14 +220,31 @@ const handleGetSamples = async (msg, s) => {
   }
 };
 
-// root get 
-app.get('/', (req, res) => {
-  Freqs.find({}).sort('-createdAt').limit(20).exec((err, data) => {
-    if (err) return res.send(err);
-    // TODO should pick up a range from database with the range properties
-    // such as range, low hz, high hz for visualizing it
-    res.send(data);
+/* 
+ * TODO Move this away to a new repo or file
+ * API STUFF
+ */
+
+// MIDDLEWARE
+app.use(cors());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+app.get('/v1/admin/clients' , (req, res) => {
+  db.clients.findAll().then(clients => {
+    console.log(JSON.parse(JSON.stringify(clients)));
+    res.send(200, clients);
   });
+});
+
+app.post('/v1/admin/activate', (req, res) => {
+  const data = req.body;
+  const active = data.is_active ? 0 : 1;
+
+  db.clients.update({ is_active: active, date_online: new Date() }, { where: { uuid: data.uuid }})
+    .then(() => {
+      db.clients.findAll().then(clients =>res.send(clients)); 
+    });
 });
 
 // listen
