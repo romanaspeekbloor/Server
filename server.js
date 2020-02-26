@@ -8,7 +8,8 @@ const cors = require('cors');
 const db = require('./lib/db');
 
 // global vars *tmp
-const clients = [];
+const connectedClients = [];
+let clients = [];
 const samplingDelay = 7000;
 let clientResponses = [];
 let getSamples = false;
@@ -18,13 +19,11 @@ let getSamples = false;
  *  s: {socket}
  */
 const setClient = (s) => {
-  if (clients.length < 1) {
-    s.emit('setClient', {
-      fqRange: '153M:153,3M',
-      sampleRate: '1k',
-      serverTime: new Date().getTime()
-    });
-  }
+  s.emit('setClient', {
+    fqRange: '153M:153,3M',
+    sampleRate: '1k',
+    serverTime: new Date().getTime()
+  });
 };
 
 const insertClient = async (name, params) => {
@@ -46,6 +45,7 @@ const insertClient = async (name, params) => {
 };
 
 const verifyClient = async (name, params) => {
+  console.log('verify', { name });
   const filters = {
     where: {
       device_name: name,
@@ -53,8 +53,12 @@ const verifyClient = async (name, params) => {
   };
   const client = await db.clients.findOne(filters);
   if (!client) return insertClient(name, params);
-  console.log('client found: ', client.dataValues);
-  return Promise.resolve(client.dataValues);
+  await db.clients.update({ is_online: true }, { where: { uuid: client.uuid }});
+
+  return Promise.resolve({
+    ...client.dataValues,
+    is_online: true
+  });
 };
 
 /**
@@ -68,19 +72,32 @@ let testCounter = 0;
 const handleClientConnect = async (name, params, s) => {
   console.log('connected: ', name);
   const client = await verifyClient(name, params);
+  console.log({ client });
   if (!client) return 0;
+
   s.rx = client;
+  clients.push(s);
+  connectedClients.push({ id: s.id, uuid: s.rx.uuid });
+  if (s.rx.is_active) s.join('active');
   if (s.rx.is_online) {
-    clients.push(s);
-    s.join('online');
+    const _clients = await db.clients.findAll();
+    //s.to('ui').emit('clientConnected', _clients);
   }
+  return 0;
+  /*
   testCounter = 0;
   while (testCounter < 100) {
     await new Promise(r => setTimeout(r, 20));
     testCounter++;
   }
-  if (!getSamples) emitTo('online', 'getSamples', clients.map(c => name));
+  if (!getSamples) //emitTo('active', 'getSamples', clients.map(c => name));
   getSamples = true;
+  */
+};
+
+const handleUIConnect = (msg, s) => {
+  s.ui = true;
+  s.join('ui');
 };
 
 /**
@@ -88,14 +105,21 @@ const handleClientConnect = async (name, params, s) => {
  * arg1: event ('connection'), arg2: callback (SOCKET)  
  */
 io.on('connection', (s) => {
-  setClient(s);
   s.on('getSamples', (msg) => handleGetSamples(msg, s));
   s.on('onClientConnect', (name, msg) => handleClientConnect(name, msg, s));
-  s.on('disconnect', () => {
-    console.log('client disconnected.');
-    clients.splice(clients.indexOf(s), 1);
-    console.log('clients: ', s.name);
-    clientResponses.splice(clientResponses.indexOf(s), 1);
+  s.on('onUIConnect', (msg) => handleUIConnect(msg, s)); 
+  s.on('disconnect', async () => {
+    if (s.ui) {
+      return 0;
+    } else {
+      console.log('client disconnected: ', s.rx.uuid);
+      await db.clients.update({ is_online: false }, { where: { uuid: s.rx.uuid }});
+      const _clients = await db.clients.findAll();
+
+      io.to('ui').emit('clientDisconnected', _clients);
+      clients.splice(clients.indexOf(s), 1);
+      clientResponses.splice(clientResponses.indexOf(s), 1);
+    }
   });
 });
 
@@ -184,7 +208,12 @@ const checkSamplingTime = (responses) => {
     console.log('saving samples...');
     return Promise.all(responses.map(res => {
       return insertSample(res); 
-    })).then(() => Promise.resolve());
+    })).then(() => {
+      db.samples.findAll().then(samples => {
+        io.to('ui').emit('newSamplesAdded', samples);
+      });
+      Promise.resolve()
+    });
   }
 };
 
@@ -193,7 +222,8 @@ const handleGetSamples = async (msg, s) => {
   const { error, data, rx = data, ...props } = d;
   const names = clientResponses.map(c => c.name);
 
-  log.info({ props });
+  log.info({ rx });
+  console.log('rx: ', s.rx)
 
   if (!names.includes(s.name)) {
     clientResponses.push({
@@ -206,17 +236,21 @@ const handleGetSamples = async (msg, s) => {
 
   error ?
     /* error handler */ () => 0 :
-    samples = rx ? clientResponses.forEach((c, i) => {
+    samples = rx ? clientResponses.forEach(async (c, i) => {
       if (c.name === s.rx.device_name) {
         clientResponses[i].samples = sampler(rx);
+      }
+      try {
+        await checkSamplingTime(clientResponses);
+      } catch (e) {
+        console.log({e});
       }
     }) : 'no data...';
 
 
-  if (clients.length === clientResponses.length && clients.length > 0) {
+  if (clients.filter(c => c.rx.is_active).length === clientResponses.length && clients.length > 0) {
     // check if all started at the same time (ms) presicion
-    await checkSamplingTime(clientResponses);
-    emitTo('online', 'getSamples', clientResponses); 
+    emitTo('active', 'getSamples', clientResponses); 
   }
 };
 
@@ -232,7 +266,6 @@ app.use(express.json());
 
 app.get('/v1/admin/clients' , (req, res) => {
   db.clients.findAll().then(clients => {
-    console.log(JSON.parse(JSON.stringify(clients)));
     res.send(200, clients);
   });
 });
@@ -241,8 +274,29 @@ app.post('/v1/admin/activate', (req, res) => {
   const data = req.body;
   const active = data.is_active ? 0 : 1;
 
-  db.clients.update({ is_active: active, date_online: new Date() }, { where: { uuid: data.uuid }})
+  db.clients.update({ is_active: active, date_activated: new Date() }, { where: { uuid: data.uuid }})
     .then(() => {
+      const sockets = io.sockets.clients().sockets;
+      const client = connectedClients.filter(c => c.uuid === data.uuid)[0];
+      const socket = sockets[client.id];
+
+      clients = clients.map(c => {
+        if (c.rx.uuid === data.uuid) {
+          c.rx.is_active = active;
+          return c;
+        }
+
+        return c;
+      })
+
+      active && socket ? 
+        socket.join('active') : 
+        socket.leave('active');
+
+      if (clients.filter(c => c.rx.is_active).length > 0) {
+        emitTo('active', 'getSamples', clientResponses);
+      }
+
       db.clients.findAll().then(clients =>res.send(clients)); 
     });
 });
