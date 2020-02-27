@@ -29,7 +29,6 @@ const setClient = (s) => {
 const insertClient = async (name, params) => {
   // TODO sort config at the client level
   // create client online/active handler so it can be set on/off
-  console.log({ params });
   if (!params.device_name) return Promise.resolve();
   const client = {
     uuid: uuidv1(),
@@ -68,12 +67,11 @@ const verifyClient = async (name, params) => {
  * msg: {string} msg
  */
 // very nasty ...
-let testCounter = 0;
+let testCounter;
 const handleClientConnect = async (name, params, s) => {
   console.log('connected: ', name);
   const client = await verifyClient(name, params);
-  console.log({ client });
-  if (!client) return 0;
+  if (!client) return Promise.resolve();
 
   s.rx = client;
   clients.push(s);
@@ -81,18 +79,17 @@ const handleClientConnect = async (name, params, s) => {
   if (s.rx.is_active) s.join('active');
   if (s.rx.is_online) {
     const _clients = await db.clients.findAll();
-    //s.to('ui').emit('clientConnected', _clients);
+    s.to('ui').emit('clientConnected', _clients);
   }
-  return 0;
-  /*
+
   testCounter = 0;
   while (testCounter < 100) {
-    await new Promise(r => setTimeout(r, 20));
+    await new Promise(r => setTimeout(r, 100));
     testCounter++;
   }
-  if (!getSamples) //emitTo('active', 'getSamples', clients.map(c => name));
+
+  if (!getSamples) emitTo('active', 'getSamples', clients.map(c => name));
   getSamples = true;
-  */
 };
 
 const handleUIConnect = (msg, s) => {
@@ -105,12 +102,12 @@ const handleUIConnect = (msg, s) => {
  * arg1: event ('connection'), arg2: callback (SOCKET)  
  */
 io.on('connection', (s) => {
-  s.on('getSamples', (msg) => handleGetSamples(msg, s));
   s.on('onClientConnect', (name, msg) => handleClientConnect(name, msg, s));
   s.on('onUIConnect', (msg) => handleUIConnect(msg, s)); 
+  s.on('getSamples', (msg) => handleGetSamples(msg, s));
   s.on('disconnect', async () => {
     if (s.ui) {
-      return 0;
+      return Promise.resolve();
     } else {
       console.log('client disconnected: ', s.rx.uuid);
       await db.clients.update({ is_online: false }, { where: { uuid: s.rx.uuid }});
@@ -191,6 +188,7 @@ const checkArrays = (a, b) => {
 const insertSample = (data) => {
   console.log({ data });
   const sample = {
+    client_uuid: data.uuid,
     freq_band_name: 'n/a',
     data: JSON.stringify(data.samples),
     sampling_start: data.startedAt,
@@ -207,12 +205,13 @@ const checkSamplingTime = (responses) => {
   if (save) {
     console.log('saving samples...');
     return Promise.all(responses.map(res => {
-      return insertSample(res); 
-    })).then(() => {
-      db.samples.findAll().then(samples => {
+      if (res.samples) return insertSample(res);
+      return Promise.resolve(); 
+    })).then(async () => {
+      await db.samples.findAll().then(samples => {
         io.to('ui').emit('newSamplesAdded', samples);
       });
-      Promise.resolve()
+      return Promise.resolve()
     });
   }
 };
@@ -221,9 +220,6 @@ const handleGetSamples = async (msg, s) => {
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
   const names = clientResponses.map(c => c.name);
-
-  log.info({ rx });
-  console.log('rx: ', s.rx)
 
   if (!names.includes(s.name)) {
     clientResponses.push({
@@ -240,17 +236,17 @@ const handleGetSamples = async (msg, s) => {
       if (c.name === s.rx.device_name) {
         clientResponses[i].samples = sampler(rx);
       }
-      try {
-        await checkSamplingTime(clientResponses);
-      } catch (e) {
-        console.log({e});
-      }
     }) : 'no data...';
-
 
   if (clients.filter(c => c.rx.is_active).length === clientResponses.length && clients.length > 0) {
     // check if all started at the same time (ms) presicion
-    emitTo('active', 'getSamples', clientResponses); 
+    try {
+      await checkSamplingTime(clientResponses);
+      emitTo('active', 'getSamples', clientResponses); 
+    } catch (e) {
+      emitTo('active', 'getSamples', clientResponses); 
+      console.log({e});
+    }
   }
 };
 
