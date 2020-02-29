@@ -189,13 +189,14 @@ const checkArrays = (a, b) => {
   return 1;
 };
 
-const insertSample = (data) => {
+const insertSample = (data, cycleDetails) => {
   const sample = {
     client_uuid: data.uuid,
     freq_band_name: 'n/a',
     data: JSON.stringify(data.samples),
     sampling_start: data.startedAt,
     saved_at: new Date(),
+    ...cycleDetails,
   }
   return db.samples.create(sample);
 };
@@ -207,9 +208,13 @@ const checkSamplingTime = (responses) => {
     .every(t => t === responses[0].startedAt);
 
   if (save) {
+    const cycleDetails = {
+      cycle_uuid: uuidv1(),
+      cycle_timestamp: new Date().getTime(),
+    };
     console.log('saving samples...');
     return Promise.all(responses.map(res => {
-      if (res.samples) return insertSample(res);
+      if (res.samples) return insertSample(res, cycleDetails);
       return Promise.resolve(); 
     })).then((samples) => {
       const cleanSamles = samples.filter(s => s).map(s => {
@@ -245,7 +250,8 @@ const handleGetSamples = async (msg, s) => {
       }
     }) : 'no data...';
 
-  if (clients.filter(c => c.rx.is_active).length === clientResponses.length && clients.length > 0) {
+  if (clients.filter(c => c.rx.is_active).length === clientResponses.length) {
+
     console.log({ clientResponses });
 
     try {
