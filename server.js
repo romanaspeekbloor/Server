@@ -4,10 +4,12 @@ const io = require('socket.io')(9955);
 const uuidv1 = require('uuid/v1');
 const app = express();
 const cors = require('cors');
+const _ = require('lodash');
 
 const db = require('./lib/db');
 
 // global vars *tmp
+let allowMakeActive = false;
 const connectedClients = [];
 let clients = [];
 const samplingDelay = 7000;
@@ -131,11 +133,13 @@ const smplReq = () => ({
 const emitTo = async (room, event, data) => {
   clientResponses = [];
   console.log('emitting to aLL');
+  allowMakeActive = true;
   // delay
   await new Promise(r => setTimeout(r, samplingDelay));
   const req = smplReq();
   req.data = data;
 
+  allowMakeActive = false;
   io.to(room).emit(event, req);
   
   console.log(`\n==================================
@@ -186,12 +190,12 @@ const checkArrays = (a, b) => {
 };
 
 const insertSample = (data) => {
-  console.log({ data });
   const sample = {
     client_uuid: data.uuid,
     freq_band_name: 'n/a',
     data: JSON.stringify(data.samples),
     sampling_start: data.startedAt,
+    saved_at: new Date(),
   }
   return db.samples.create(sample);
 };
@@ -207,11 +211,13 @@ const checkSamplingTime = (responses) => {
     return Promise.all(responses.map(res => {
       if (res.samples) return insertSample(res);
       return Promise.resolve(); 
-    })).then(async () => {
-      await db.samples.findAll().then(samples => {
-        io.to('ui').emit('newSamplesAdded', samples);
+    })).then((samples) => {
+      const cleanSamles = samples.filter(s => s).map(s => {
+        const { sample_id, data, ...rest } = JSON.parse(JSON.stringify(s));
+        return rest;
       });
-      return Promise.resolve()
+      io.to('ui').emit('newSamplesAdded', cleanSamles);
+      return Promise.resolve();
     });
   }
 };
@@ -230,16 +236,18 @@ const handleGetSamples = async (msg, s) => {
     });
   }
 
+
   error ?
     /* error handler */ () => 0 :
-    samples = rx ? clientResponses.forEach(async (c, i) => {
+    samples = rx ? clientResponses.forEach((c, i) => {
       if (c.name === s.rx.device_name) {
         clientResponses[i].samples = sampler(rx);
       }
     }) : 'no data...';
 
   if (clients.filter(c => c.rx.is_active).length === clientResponses.length && clients.length > 0) {
-    // check if all started at the same time (ms) presicion
+    console.log({ clientResponses });
+
     try {
       await checkSamplingTime(clientResponses);
       emitTo('active', 'getSamples', clientResponses); 
@@ -270,31 +278,31 @@ app.post('/v1/admin/activate', (req, res) => {
   const data = req.body;
   const active = data.is_active ? 0 : 1;
 
-  db.clients.update({ is_active: active, date_activated: new Date() }, { where: { uuid: data.uuid }})
-    .then(() => {
-      const sockets = io.sockets.clients().sockets;
-      const client = connectedClients.filter(c => c.uuid === data.uuid)[0];
-      const socket = sockets[client.id];
+  // TODO get rid of this boolean and make clients active to it does not break sampling cycle or spams another one.
+  if (allowMakeActive) {
+    db.clients.update({ is_active: active, date_activated: new Date() }, { where: { uuid: data.uuid }})
+      .then(() => {
+        const sockets = io.sockets.clients().sockets;
+        const client = connectedClients.filter(c => c.uuid === data.uuid)[0];
+        const socket = sockets[client.id];
+        clients = clients.map(c => {
+          if (c.rx.uuid === data.uuid) {
+            c.rx.is_active = active;
+            return c;
+          }
 
-      clients = clients.map(c => {
-        if (c.rx.uuid === data.uuid) {
-          c.rx.is_active = active;
           return c;
-        }
+        })
 
-        return c;
-      })
+        active && socket ? 
+          socket.join('active') : 
+          socket.leave('active');
 
-      active && socket ? 
-        socket.join('active') : 
-        socket.leave('active');
-
-      if (clients.filter(c => c.rx.is_active).length > 0) {
-        emitTo('active', 'getSamples', clientResponses);
-      }
-
-      db.clients.findAll().then(clients =>res.send(clients)); 
-    });
+        db.clients.findAll().then(clients => res.send(clients)); 
+      });
+  } else {
+    db.clients.findAll().then(clients => res.send(clients)); 
+  }
 });
 
 // listen
