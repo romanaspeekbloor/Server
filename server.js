@@ -8,8 +8,10 @@ const _ = require('lodash');
 
 const db = require('./lib/db');
 
+// TODO move whatever possible to classes/etc
 // global vars *tmp
 let allowMakeActive = false;
+let t1 = null;
 const connectedClients = [];
 let clients = [];
 const samplingDelay = 7000;
@@ -90,7 +92,7 @@ const handleClientConnect = async (name, params, s) => {
     testCounter++;
   }
 
-  if (!getSamples) emitTo('active', 'getSamples', clients.map(c => name));
+  if (!getSamples) emitTo('active', 'getSamples', clients.map(c => c.rx));
   getSamples = true;
 };
 
@@ -139,13 +141,19 @@ const emitTo = async (room, event, data) => {
   const req = smplReq();
   req.data = data;
 
+  t1 = setTimeout(() => {
+    console.log(`no responses to event req - ${event}`);
+    emitTo('active', 'getSamples', {});
+  }, 20000);
+
   allowMakeActive = false;
   io.to(room).emit(event, req);
   
-  console.log(`\n==================================
-    emitting [${event}] event
-    clients [${clients.map(c => c.rx.device_name)}]
-    server timestamp: ${req.serverTime}`);
+  console.log('===============================================');
+  clients.map(c => {
+    const { rx } = c;
+    console.log(`uuid: ${rx.uuid} IsActive: ${rx.is_active}`);
+  });
 };
 
 /**
@@ -228,6 +236,7 @@ const checkSamplingTime = (responses) => {
 };
 
 const handleGetSamples = async (msg, s) => {
+  if (t1) clearTimeout(t1);
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
   const names = clientResponses.map(c => c.name);
@@ -250,10 +259,8 @@ const handleGetSamples = async (msg, s) => {
       }
     }) : 'no data...';
 
-  if (clients.filter(c => c.rx.is_active).length === clientResponses.length) {
-
+  if (clients.filter(c => c.rx.is_active).length === clientResponses.length && clients.length > 0) {
     console.log({ clientResponses });
-
     try {
       await checkSamplingTime(clientResponses);
       emitTo('active', 'getSamples', clientResponses); 
@@ -282,6 +289,7 @@ app.get('/v1/admin/clients' , (req, res) => {
 
 app.post('/v1/admin/activate', (req, res) => {
   const data = req.body;
+  console.log(data)
   const active = data.is_active ? 0 : 1;
 
   // TODO get rid of this boolean and make clients active to it does not break sampling cycle or spams another one.
