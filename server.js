@@ -144,7 +144,7 @@ const emitTo = async (room, event, data) => {
   t1 = setTimeout(() => {
     console.log(`no responses to event req - ${event}`);
     emitTo('active', 'getSamples', {});
-  }, 20000);
+  }, 10000);
 
   allowMakeActive = false;
   io.to(room).emit(event, req);
@@ -174,17 +174,6 @@ const toNum = (str) => {
   if (!isNaN(n)) return n;
 };
 
-/* 
- * sampler returns an array of noise levels
- * raw: String
- */
-const sampler = (raw) => {
-  log.info(`sampling... raw length = [${raw.length}]`);
-  const smpl = raw.match(/([-])\d+([.])\d{2}/g);
-  const freqs = smpl.map(s => toNum(s));
-  return freqs;
-}
-
 const checkArrays = (a, b) => {
   if (a === b) return 0;
   if (a == null || b == null) return 0;
@@ -208,6 +197,13 @@ const insertSample = (data, cycleDetails) => {
   }
   return db.samples.create(sample);
 };
+
+const sampler = (raw) => {
+  log.info(`sampling... raw length = [${raw.length}]`);
+  const smpl = raw.match(/([-])\d+([.])\d{2}/g);
+  const freqs = smpl.map(s => toNum(s));
+  return freqs;
+}
 
 // check if sampling time is the same (ms)
 const checkSamplingTime = (responses) => {
@@ -237,6 +233,7 @@ const checkSamplingTime = (responses) => {
 
 const handleGetSamples = async (msg, s) => {
   if (t1) clearTimeout(t1);
+  const ingestT = process.hrtime.bigint();
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
   const names = clientResponses.map(c => c.name);
@@ -245,8 +242,7 @@ const handleGetSamples = async (msg, s) => {
     clientResponses.push({
       name: s.rx.device_name,
       uuid: s.rx.uuid,
-      startedAt: props.startedAt,
-      benchMark: props.benchMark,
+      ...props,
     });
   }
 
@@ -260,10 +256,17 @@ const handleGetSamples = async (msg, s) => {
     }) : 'no data...';
 
   if (clients.filter(c => c.rx.is_active).length === clientResponses.length && clients.length > 0) {
-    console.log({ clientResponses });
     try {
       await checkSamplingTime(clientResponses);
-      emitTo('active', 'getSamples', clientResponses); 
+      const noSamples = clientResponses.map(c => {
+        const { samples, ...filtered } = c;
+        return ({ 
+          ...filtered,
+          ingestT: parseInt(process.hrtime.bigint() - ingestT),
+        });
+      });
+      console.log(noSamples);
+      emitTo('active', 'getSamples', noSamples); 
     } catch (e) {
       emitTo('active', 'getSamples', clientResponses); 
       console.log({e});
