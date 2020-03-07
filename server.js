@@ -191,7 +191,7 @@ const insertSample = (data, cycleDetails) => {
     client_uuid: data.uuid,
     freq_band_name: 'n/a',
     data: JSON.stringify(data.samples),
-    sampling_start: data.startedAt,
+    sampling_time: data.samplingTime.us,
     saved_at: new Date(),
     ...cycleDetails,
   }
@@ -201,38 +201,32 @@ const insertSample = (data, cycleDetails) => {
 const sampler = (raw) => {
   log.info(`sampling... raw length = [${raw.length}]`);
   const smpl = raw.match(/([-])\d+([.])\d{2}/g);
+  if (!smpl) return '';
   const freqs = smpl.map(s => toNum(s));
   return freqs;
 }
 
 // check if sampling time is the same (ms)
 const checkSamplingTime = (responses) => {
-  // validate execution time
-  const save = responses.map(r => r.startedAt)
-    .every(t => t === responses[0].startedAt);
-
-  if (save) {
-    const cycleDetails = {
-      cycle_uuid: uuidv1(),
-      cycle_timestamp: new Date().getTime(),
-    };
-    console.log('saving samples...');
-    return Promise.all(responses.map(res => {
-      if (res.samples) return insertSample(res, cycleDetails);
-      return Promise.resolve(); 
-    })).then((samples) => {
-      const cleanSamles = samples.filter(s => s).map(s => {
-        const { sample_id, data, ...rest } = JSON.parse(JSON.stringify(s));
-        return rest;
-      });
-      io.to('ui').emit('newSamplesAdded', cleanSamles);
-      return Promise.resolve();
+  const cycleDetails = {
+    cycle_uuid: uuidv1(),
+    cycle_timestamp: new Date().getTime(),
+  };
+  console.log('saving samples...');
+  return Promise.all(responses.map(res => {
+    if (res.samples) return insertSample(res, cycleDetails);
+    return Promise.resolve(); 
+  })).then((samples) => {
+    const cleanSamles = samples.filter(s => s).map(s => {
+      const { sample_id, data, ...rest } = JSON.parse(JSON.stringify(s));
+      return rest;
     });
-  }
+    io.to('ui').emit('newSamplesAdded', cleanSamles);
+    return Promise.resolve();
+  });
 };
 
 const handleGetSamples = async (msg, s) => {
-  if (t1) clearTimeout(t1);
   const ingestT = process.hrtime.bigint();
   const d = JSON.parse(msg.replace(/\r?\n|\r|\\n/g, ""));
   const { error, data, rx = data, ...props } = d;
@@ -256,6 +250,7 @@ const handleGetSamples = async (msg, s) => {
     }) : 'no data...';
 
   if (clients.filter(c => c.rx.is_active).length === clientResponses.length && clients.length > 0) {
+    if (t1) clearTimeout(t1);
     try {
       await checkSamplingTime(clientResponses);
       const noSamples = clientResponses.map(c => {
